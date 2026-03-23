@@ -311,79 +311,40 @@ gather_config() {
   echo
   echo -e "${BOLD}${CYAN}━━━  Configuration  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
+  info "All values are auto-configured. AI keys and channels are set up via the web UI after install."
+  echo
 
-  # Installation directory
-  ask INSTALL_DIR "Installation directory" "$HOME/openclaw"
+  # Installation directory — always use default, no prompt needed
+  INSTALL_DIR="$HOME/openclaw"
 
   # Gateway port
   ask GATEWAY_PORT "Gateway web UI port" "18789"
 
-  # Pre-built image or build locally?
-  echo
-  info "Image source:"
-  echo "  1) Pre-built image from GitHub Container Registry (faster, recommended)"
-  echo "  2) Build from source (slower, no external registry needed)"
-  ask IMAGE_CHOICE "Choose" "1"
-  if [[ "$IMAGE_CHOICE" == "1" ]]; then
-    OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
-    info "Using pre-built image: ${OPENCLAW_IMAGE}"
-  else
-    OPENCLAW_IMAGE="openclaw:local"
-    info "Will build image from source."
-  fi
+  # Always use pre-built image
+  OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
+  info "Image: ${OPENCLAW_IMAGE}"
 
-  # Gateway token
+  # Auto-generate gateway token — show it clearly, no prompt
+  GATEWAY_TOKEN=$(openssl rand -hex 32)
   echo
-  AUTO_TOKEN=$(openssl rand -hex 32)
-  info "A secure gateway token will be auto-generated."
-  info "Auto-generated token: ${YELLOW}${AUTO_TOKEN}${RESET}"
-  ask_secret GATEWAY_TOKEN "Press Enter to accept OR type your own token" "$AUTO_TOKEN"
-
-  # AI Provider API Keys
-  echo
-  echo -e "${BOLD}${CYAN}━━━  AI Provider API Keys  ━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  info "These are optional but at least one is recommended for full functionality."
+  echo -e "  ${BOLD}Gateway Token (save this — you need it to log in):${RESET}"
+  echo -e "  ${YELLOW}${BOLD}${GATEWAY_TOKEN}${RESET}"
   echo
 
-  ask_optional ANTHROPIC_API_KEY  "Anthropic (Claude) API key"
-  ask_optional OPENAI_API_KEY     "OpenAI API key"
-  ask_optional GEMINI_API_KEY     "Google Gemini API key"
-  ask_optional XAI_API_KEY        "xAI (Grok) API key"
+  # Auto-detect timezone
+  TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
+  info "Timezone: ${TIMEZONE}"
 
-  # Messaging channels
-  echo
-  echo -e "${BOLD}${CYAN}━━━  Messaging Channels  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  info "You can configure channels now or later with:"
-  info "  docker compose run --rm openclaw-cli channels add ..."
-  echo
+  # Sandbox on by default
+  OPENCLAW_SANDBOX=1
 
-  ask_optional TELEGRAM_BOT_TOKEN "Telegram bot token (from @BotFather)"
-  ask_optional DISCORD_BOT_TOKEN  "Discord bot token"
-  ask_optional WHATSAPP_NUMBER    "WhatsApp number (e.g. +1234567890)"
-
-  # Timezone
-  echo
-  SYSTEM_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
-  ask TIMEZONE "Timezone" "$SYSTEM_TZ"
-
-  # Sandbox
-  echo
-  OPENCLAW_SANDBOX=0
-  if ask_yn "Enable agent sandbox (isolated tool execution, recommended for production)" "y"; then
-    OPENCLAW_SANDBOX=1
-  fi
-
-  # Firewall
-  echo
+  # Auto-open firewall if available
   CONFIGURE_FIREWALL=false
   if command_exists ufw || command_exists firewall-cmd; then
-    if ask_yn "Open port ${GATEWAY_PORT} in the firewall?" "y"; then
-      CONFIGURE_FIREWALL=true
-    fi
+    CONFIGURE_FIREWALL=true
   fi
 
-  echo
-  success "Configuration complete."
+  success "Configuration ready."
 }
 
 # ─── Clone / Update Repo ──────────────────────────────────────────────────────
@@ -442,36 +403,10 @@ TZ=${TIMEZONE}
 
 EOF
 
-  # AI keys — only write if provided
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$env_file"
-  fi
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-    echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> "$env_file"
-  fi
-  if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-    echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> "$env_file"
-  fi
-  if [[ -n "${XAI_API_KEY:-}" ]]; then
-    echo "XAI_API_KEY=${XAI_API_KEY}" >> "$env_file"
-  fi
-
-  # Messaging tokens — only write if provided
-  if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
-    echo "" >> "$env_file"
-    echo "# ── Telegram ───────────────────────────────────────────────────────────────" >> "$env_file"
-    echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}" >> "$env_file"
-  fi
-  if [[ -n "${DISCORD_BOT_TOKEN:-}" ]]; then
-    echo "" >> "$env_file"
-    echo "# ── Discord ────────────────────────────────────────────────────────────────" >> "$env_file"
-    echo "DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}" >> "$env_file"
-  fi
-  if [[ -n "${WHATSAPP_NUMBER:-}" ]]; then
-    echo "" >> "$env_file"
-    echo "# ── WhatsApp ────────────────────────────────────────────────────────────────" >> "$env_file"
-    echo "WHATSAPP_NUMBER=${WHATSAPP_NUMBER}" >> "$env_file"
-  fi
+  # AI keys and channel tokens are configured via the web UI after install.
+  # Add them manually to this file if needed, e.g.:
+  #   ANTHROPIC_API_KEY=sk-...
+  #   OPENAI_API_KEY=sk-...
 
   # Secure the file — only owner can read
   chmod 600 "$env_file"
@@ -519,33 +454,6 @@ start_services() {
   success "Gateway container started."
 }
 
-# ─── Configure Channels ───────────────────────────────────────────────────────
-configure_channels() {
-  cd "$INSTALL_DIR"
-
-  if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
-    info "Connecting Telegram channel..."
-    docker compose run --rm openclaw-cli channels add \
-      --channel telegram \
-      --token "$TELEGRAM_BOT_TOKEN" && success "Telegram connected." || \
-      warn "Telegram setup failed. Run manually: docker compose run --rm openclaw-cli channels add --channel telegram --token <TOKEN>"
-  fi
-
-  if [[ -n "${DISCORD_BOT_TOKEN:-}" ]]; then
-    info "Connecting Discord channel..."
-    docker compose run --rm openclaw-cli channels add \
-      --channel discord \
-      --token "$DISCORD_BOT_TOKEN" && success "Discord connected." || \
-      warn "Discord setup failed. Run manually: docker compose run --rm openclaw-cli channels add --channel discord --token <TOKEN>"
-  fi
-
-  if [[ -n "${WHATSAPP_NUMBER:-}" ]]; then
-    info "WhatsApp requires scanning a QR code. Starting WhatsApp login..."
-    docker compose run --rm openclaw-cli channels login || \
-      warn "WhatsApp login failed. Run manually: docker compose run --rm openclaw-cli channels login"
-  fi
-}
-
 # ─── Firewall ─────────────────────────────────────────────────────────────────
 configure_firewall() {
   if [[ "$CONFIGURE_FIREWALL" != "true" ]]; then
@@ -591,43 +499,26 @@ print_summary() {
   server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "your-server-ip")
 
   echo
-  echo -e "${BOLD}${GREEN}━━━  Deployment Complete  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo -e "${BOLD}${GREEN}  OpenClaw is ready!${RESET}"
+  echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Web UI:${RESET}         http://${server_ip}:${GATEWAY_PORT}"
-  echo -e "  ${BOLD}Local URL:${RESET}      http://127.0.0.1:${GATEWAY_PORT}"
-  echo -e "  ${BOLD}Gateway Token:${RESET}  ${YELLOW}${GATEWAY_TOKEN}${RESET}"
-  echo -e "  ${BOLD}Install Dir:${RESET}    ${INSTALL_DIR}"
-  echo -e "  ${BOLD}Config Dir:${RESET}     ~/.openclaw"
-  echo -e "  ${BOLD}Workspace:${RESET}      ~/openclaw/workspace"
+  echo -e "  ${BOLD}Open in your browser:${RESET}"
+  echo -e "  ${BOLD}${CYAN}  ➜  http://${server_ip}:${GATEWAY_PORT}${RESET}"
+  echo
+  echo -e "  ${BOLD}Login token:${RESET}"
+  echo -e "  ${YELLOW}${BOLD}  ${GATEWAY_TOKEN}${RESET}"
+  echo
+  echo -e "  Paste the token into the web UI to log in."
+  echo -e "  Configure AI keys, channels (WhatsApp, Telegram, Discord)"
+  echo -e "  and all other settings directly inside the dashboard."
   echo
   echo -e "${BOLD}${CYAN}━━━  Useful Commands  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Status:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml ps"
-  echo
-  echo -e "  ${BOLD}Logs:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
-  echo
-  echo -e "  ${BOLD}Stop:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
-  echo
-  echo -e "  ${BOLD}Restart:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml restart openclaw-gateway"
-  echo
-  echo -e "  ${BOLD}Add WhatsApp:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml run --rm openclaw-cli channels login"
-  echo
-  echo -e "  ${BOLD}Add Telegram:${RESET}"
-  echo -e "    docker compose -f ${INSTALL_DIR}/docker-compose.yml run --rm openclaw-cli channels add --channel telegram --token <TOKEN>"
-  echo
-  echo -e "  ${BOLD}Update OpenClaw:${RESET}"
-  echo -e "    cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
-  echo
-  echo -e "${BOLD}${YELLOW}━━━  Security Reminder  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo -e "  • Keep your Gateway Token secret — it is the only authentication."
-  echo -e "  • The .env file is chmod 600 (owner-read-only)."
-  echo -e "  • If running on a public IP, consider placing Nginx/Caddy in front"
-  echo -e "    with HTTPS and restricting access by IP or VPN only."
+  echo -e "  ${BOLD}Logs:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
+  echo -e "  ${BOLD}Stop:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
+  echo -e "  ${BOLD}Restart:${RESET} docker compose -f ${INSTALL_DIR}/docker-compose.yml restart openclaw-gateway"
+  echo -e "  ${BOLD}Update:${RESET}  cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
   echo
 }
 
@@ -668,7 +559,6 @@ main() {
   prepare_image
   run_onboarding
   start_services
-  configure_channels
   configure_firewall
   health_check
   print_summary
