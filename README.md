@@ -1,6 +1,6 @@
 # OpenClaw Self-Hosted Deployment Script
 
-> One-shot interactive Bash script that installs and configures [OpenClaw](https://github.com/openclaw/openclaw) on any Linux server — your own VPS, home lab, or private VPN — without Hostinger's hPanel.
+> One-shot Bash script that installs and configures [OpenClaw](https://github.com/openclaw/openclaw) on any Linux server — your own VPS, home lab, or private VPN — without Hostinger's hPanel.
 
 If this saved you time, consider giving it a ⭐ on [GitHub](https://github.com/tahasaifeee/openclaw_AutoInstall_Dockerized)!
 
@@ -8,21 +8,21 @@ If this saved you time, consider giving it a ⭐ on [GitHub](https://github.com/
 
 ## What It Does
 
-`deploy.sh` automates the full setup in a single interactive run:
+`deploy.sh` automates the complete setup in a single run:
 
 | Step | What happens |
 |------|-------------|
-| 1 | Detects your OS and package manager |
-| 2 | Installs prerequisites (Docker Engine, Docker Compose v2, git, curl, openssl, jq) |
-| 3 | Adds your user to the `docker` group and refreshes permissions |
-| 4 | Prompts for all configuration (port, API keys, channels, sandbox, etc.) |
-| 5 | Clones the OpenClaw repository |
-| 6 | Writes a secure `.env` file (`chmod 600`) |
-| 7 | Pulls the pre-built image **or** builds from source |
-| 8 | Runs onboarding and starts the gateway container |
-| 9 | Optionally connects Telegram / Discord / WhatsApp |
-| 10 | Opens the firewall port (ufw or firewalld) |
-| 11 | Health-checks the gateway and prints a full summary |
+| 1 | Detects OS and installs prerequisites (Docker, Docker Compose v2, git, curl, openssl, jq) |
+| 2 | Resolves the latest stable OpenClaw release from GitHub |
+| 3 | Clones the OpenClaw repo at that exact release tag |
+| 4 | Patches `openclaw.json` for LAN/remote access and syncs auth tokens |
+| 5 | Generates a self-signed TLS certificate and sets up Caddy as HTTPS reverse proxy |
+| 6 | Starts the gateway + Caddy containers via Docker Compose |
+| 7 | Opens the firewall port (ufw or firewalld) |
+| 8 | Health-checks the gateway |
+| 9 | Displays the dashboard URL with token pre-filled, then auto-approves the browser pairing |
+
+Everything after that — AI keys, channels, agents — is configured through the web UI.
 
 ---
 
@@ -42,16 +42,16 @@ If this saved you time, consider giving it a ⭐ on [GitHub](https://github.com/
 
 ## Requirements
 
-- A Linux server (local, VPN, or any VPS)
-- A non-root user with `sudo` privileges
-- Internet access (to pull the Docker image and clone the repo)
+- A Linux server (local network, VPN, or any VPS)
+- Non-root user with `sudo` privileges (or root)
+- Internet access to pull the Docker image and clone the repo
 - Minimum **2 GB RAM**
 
 ---
 
-## Quick Start
+## Install
 
-### One-line install *(recommended)*
+### One-line *(recommended)*
 
 SSH into your server and run:
 
@@ -59,110 +59,94 @@ SSH into your server and run:
 bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh)
 ```
 
-That's it. The script handles everything from Docker installation to the running gateway.
-
-### Manual install
+### Manual
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh -o deploy.sh
 chmod +x deploy.sh && bash deploy.sh
 ```
 
-> **Note:** Run these commands on your server over SSH, not on your local machine.
+> Run these commands on your server — not your local machine.
 
 ---
 
-## Interactive Prompts
+## Setup Flow
 
-The script will ask for the following during setup. All items have sensible defaults.
+The script asks only **one question** (HTTPS port, default `443`). Everything else is automatic.
 
-### General
-
-| Prompt | Default | Required |
-|--------|---------|----------|
-| Installation directory | `~/openclaw` | Yes |
-| Gateway web UI port | `18789` | Yes |
-| Image source (pre-built / build from source) | Pre-built (ghcr.io) | Yes |
-| Gateway token | Auto-generated (32-byte hex) | Yes |
-| Timezone | System timezone | Yes |
-| Enable agent sandbox | Yes | Yes |
-| Open firewall port | Yes (if ufw/firewalld detected) | No |
-
-### AI Provider API Keys *(at least one recommended)*
-
-| Key | Provider |
-|-----|---------|
-| `ANTHROPIC_API_KEY` | Claude (Anthropic) |
-| `OPENAI_API_KEY` | OpenAI / ChatGPT |
-| `GEMINI_API_KEY` | Google Gemini |
-| `XAI_API_KEY` | xAI / Grok |
-
-### Messaging Channels *(all optional — can be added later)*
-
-| Prompt | Notes |
-|--------|-------|
-| Telegram bot token | Create a bot via [@BotFather](https://t.me/BotFather) |
-| Discord bot token | Create at [discord.com/developers](https://discord.com/developers) |
-| WhatsApp number | Triggers QR-code scan flow |
-
----
-
-## After Deployment
-
-Once the script completes, you'll see a summary like:
+Once the gateway is running, the script displays:
 
 ```
-  Web UI:         http://192.168.1.10:18789
-  Local URL:      http://127.0.0.1:18789
-  Gateway Token:  a3f9c2...
-  Install Dir:    /home/you/openclaw
-  Config Dir:     ~/.openclaw
-  Workspace:      ~/openclaw/workspace
+━━━  Browser Pairing  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Open this URL in your browser:
+  ➜  https://10.11.100.150/#token=65f3c944...
+
+  Accept the certificate warning, then click Connect.
+  The script will auto-approve the pairing request.
 ```
 
-Open the web UI in your browser and paste the **Gateway Token** to log in.
+1. Open the URL in your browser
+2. Click **Advanced → Proceed** on the certificate warning (self-signed cert, expected)
+3. Click **Connect** — the script detects the pairing request and approves it automatically
+4. You're in — configure AI keys and channels from the dashboard
 
 ---
 
-## Common Post-Install Commands
+## Architecture
+
+```
+Browser (HTTPS :443)
+      ↓
+ Caddy container  ←  self-signed TLS cert (generated by openssl)
+      ↓
+ openclaw-gateway container  (:18789, internal only)
+```
+
+- **Caddy** handles TLS so the browser's WebCrypto API works (required for device identity)
+- **Gateway** only listens on the internal Docker network — never exposed directly
+- **Config** lives in `~/.openclaw/openclaw.json` (managed by OpenClaw)
+- **Workspace** at `~/openclaw/workspace/` is accessible to the AI agent
+
+---
+
+## Uninstall
 
 ```bash
-# View status
-docker compose -f ~/openclaw/docker-compose.yml ps
+bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh) --uninstall
+```
 
-# Follow logs
-docker compose -f ~/openclaw/docker-compose.yml logs -f openclaw-gateway
+Removes containers, volumes, Docker images (optional), firewall rule, `~/openclaw/`, and `~/.openclaw/`.
+
+---
+
+## Post-Install Commands
+
+```bash
+# Logs
+cd ~/openclaw && docker compose logs -f
 
 # Stop
-docker compose -f ~/openclaw/docker-compose.yml down
+cd ~/openclaw && docker compose down
 
 # Restart
-docker compose -f ~/openclaw/docker-compose.yml restart openclaw-gateway
+cd ~/openclaw && docker compose restart
 
-# Update to latest
+# Update to latest release
 cd ~/openclaw && git pull && docker compose pull && docker compose up -d
 ```
 
-### Add messaging channels later
+### Add messaging channels
 
 ```bash
 # WhatsApp (QR code scan)
-docker compose -f ~/openclaw/docker-compose.yml run --rm openclaw-cli channels login
+docker compose -C ~/openclaw run --rm openclaw-cli channels login
 
 # Telegram
-docker compose -f ~/openclaw/docker-compose.yml run --rm openclaw-cli channels add \
-  --channel telegram --token <YOUR_BOT_TOKEN>
+docker compose -C ~/openclaw run --rm openclaw-cli channels add --channel telegram --token <TOKEN>
 
 # Discord
-docker compose -f ~/openclaw/docker-compose.yml run --rm openclaw-cli channels add \
-  --channel discord --token <YOUR_BOT_TOKEN>
-```
-
-### Health check endpoints
-
-```bash
-curl http://127.0.0.1:18789/healthz   # Liveness
-curl http://127.0.0.1:18789/readyz    # Readiness
+docker compose -C ~/openclaw run --rm openclaw-cli channels add --channel discord --token <TOKEN>
 ```
 
 ---
@@ -170,20 +154,14 @@ curl http://127.0.0.1:18789/readyz    # Readiness
 ## Directory Structure
 
 ```
-~/openclaw/            ← cloned OpenClaw repo + docker-compose.yml
-~/openclaw/.env        ← your secrets (chmod 600, never commit this)
-~/.openclaw/           ← runtime config, memory, channel state
-~/openclaw/workspace/  ← files the AI agent can read/write
+~/openclaw/                  ← OpenClaw repo + docker-compose.yml
+~/openclaw/.env              ← runtime config (chmod 600)
+~/openclaw/certs/            ← self-signed TLS cert + key
+~/openclaw/Caddyfile         ← Caddy reverse proxy config
+~/openclaw/docker-compose.override.yml  ← Caddy sidecar definition
+~/.openclaw/                 ← gateway config, memory, device state
+~/openclaw/workspace/        ← files accessible to the AI agent
 ```
-
----
-
-## Security Notes
-
-- The **Gateway Token** is the only authentication layer for the web UI. Keep it secret.
-- The `.env` file is written with `chmod 600` — only your user can read it.
-- By default the gateway binds to all LAN interfaces (`OPENCLAW_GATEWAY_BIND=lan`). If your server has a public IP, restrict access with a firewall rule or put a reverse proxy (Nginx / Caddy) with HTTPS in front.
-- Never commit `.env` to version control.
 
 ---
 
@@ -191,21 +169,22 @@ curl http://127.0.0.1:18789/readyz    # Readiness
 
 | Symptom | Fix |
 |---------|-----|
-| `permission denied` running Docker | Log out and back in, or run `newgrp docker` |
-| Gateway health check times out | `docker compose logs openclaw-gateway` to see errors |
-| WhatsApp QR code not appearing | Run the channels login command in an interactive terminal |
-| Port already in use | Change `OPENCLAW_GATEWAY_PORT` in `.env` and restart |
+| `ERR_SSL_PROTOCOL_ERROR` | Run `cd ~/openclaw && docker compose restart caddy` |
+| `too many failed authentication attempts` | Run `cd ~/openclaw && docker compose restart openclaw-gateway` |
+| `gateway token mismatch` | Token is in `~/.openclaw/openclaw.json` → `.gateway.auth.token` |
+| Pairing stuck | Run `cd ~/openclaw && docker compose run --rm openclaw-cli devices approve $(jq -r 'keys[0]' ~/.openclaw/devices/pending.json)` |
+| Gateway not healthy | Run `cd ~/openclaw && docker compose logs openclaw-gateway` |
+| Port 443 in use | Edit `HTTPS_PORT` in `docker-compose.override.yml` and `Caddyfile`, then `docker compose up -d` |
 | `docker compose` not found | Re-run the script — it installs Compose v2 automatically |
 
 ---
 
-## Re-running the Script
+## Security Notes
 
-The script is idempotent for most steps:
-
-- Already-installed packages are skipped.
-- If the repo directory already exists, it runs `git pull` instead of cloning.
-- The `.env` file is **overwritten** on each run — back it up first if you've made manual changes.
+- The gateway token is managed by `openclaw.json` — it is set once during onboarding and never rotated by the script on re-runs.
+- The TLS certificate is self-signed (valid 10 years). For production, replace it with a real cert or use Caddy's ACME/Let's Encrypt with a domain name.
+- Port 443 is the only port exposed. The gateway port (18789) stays internal to the Docker network.
+- `~/openclaw/.env` is `chmod 600` — owner-read-only.
 
 ---
 
