@@ -483,20 +483,22 @@ patch_config() {
 
   info "Patching OpenClaw config for LAN/remote access..."
 
-  # Deep-merge LAN settings into the config.
-  # - bind: lan        → gateway listens on all interfaces (not just loopback)
-  # - dangerouslyAllowHostHeaderOriginFallback → Control UI works over IP
-  local tmp="${config_file}.patch.tmp"
-  jq '. * {"gateway": {"bind": "lan", "controlUi": {"dangerouslyAllowHostHeaderOriginFallback": true}}}' \
-    "$config_file" > "$tmp" && mv "$tmp" "$config_file"
-
-  # Read the actual auth token from the correct path (.gateway.auth.token)
+  # Read the auth token set by onboarding
   local actual_token
   actual_token=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
   if [[ -n "$actual_token" ]]; then
     GATEWAY_TOKEN="$actual_token"
-    info "Gateway auth token read from config."
+    info "Gateway auth token read from config: ${GATEWAY_TOKEN:0:16}..."
   fi
+
+  # Deep-merge all required settings:
+  # - bind: lan                              → listen on all interfaces, not just loopback
+  # - remote.token = auth.token             → CLI and device pairing can connect
+  # - dangerouslyAllowHostHeaderOriginFallback → Control UI works over IP/LAN
+  local tmp="${config_file}.patch.tmp"
+  jq --arg token "$GATEWAY_TOKEN" \
+    '. * {"gateway": {"bind": "lan", "remote": {"token": $token}, "controlUi": {"dangerouslyAllowHostHeaderOriginFallback": true}}}' \
+    "$config_file" > "$tmp" && mv "$tmp" "$config_file"
 
   # Re-apply ownership so the container's node user can still write the file
   chown 1000:1000 "$config_file" 2>/dev/null || chmod 666 "$config_file"
