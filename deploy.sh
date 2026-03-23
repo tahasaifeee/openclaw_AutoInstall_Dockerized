@@ -325,8 +325,16 @@ gather_config() {
   OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
   info "Image: ${OPENCLAW_IMAGE}"
 
-  # Auto-generate gateway token — show it clearly, no prompt
-  GATEWAY_TOKEN=$(openssl rand -hex 32)
+  # Preserve existing token on re-runs; generate once on first install
+  local existing_token
+  existing_token=$(grep -m1 'OPENCLAW_GATEWAY_TOKEN=' "${INSTALL_DIR}/.env" 2>/dev/null \
+    | cut -d'=' -f2-)
+  if [[ -n "$existing_token" ]]; then
+    GATEWAY_TOKEN="$existing_token"
+    info "Preserving existing gateway token."
+  else
+    GATEWAY_TOKEN=$(openssl rand -hex 32)
+  fi
   echo
   echo -e "  ${BOLD}Gateway Token (save this — you need it to log in):${RESET}"
   echo -e "  ${YELLOW}${BOLD}${GATEWAY_TOKEN}${RESET}"
@@ -475,11 +483,20 @@ patch_config() {
 
   info "Patching OpenClaw config for LAN/remote access..."
 
-  # Merge dangerouslyAllowHostHeaderOriginFallback=true into the existing config.
-  # jq '. * {...}' does a deep merge so existing keys are preserved.
+  # Deep-merge LAN settings into the config.
+  # - bind: lan        → gateway listens on all interfaces (not just loopback)
+  # - dangerouslyAllowHostHeaderOriginFallback → Control UI works over IP
   local tmp="${config_file}.patch.tmp"
-  jq '. * {"gateway": {"controlUi": {"dangerouslyAllowHostHeaderOriginFallback": true}}}' \
+  jq '. * {"gateway": {"bind": "lan", "controlUi": {"dangerouslyAllowHostHeaderOriginFallback": true}}}' \
     "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+
+  # Read the actual auth token from the correct path (.gateway.auth.token)
+  local actual_token
+  actual_token=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
+  if [[ -n "$actual_token" ]]; then
+    GATEWAY_TOKEN="$actual_token"
+    info "Gateway auth token read from config."
+  fi
 
   # Re-apply ownership so the container's node user can still write the file
   chown 1000:1000 "$config_file" 2>/dev/null || chmod 666 "$config_file"
@@ -491,16 +508,37 @@ patch_config() {
 setup_caddy() {
   info "Setting up Caddy HTTPS reverse proxy..."
 
-  # Caddyfile — internal TLS (self-signed CA) proxying to the gateway container
+  local cert_dir="${INSTALL_DIR}/certs"
+  mkdir -p "$cert_dir"
+
+  # Detect all IPs this server is reachable on for the cert SAN
+  local server_ips
+  server_ips=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | \
+    sed 's/^/IP:/' | paste -sd ',' -)
+  [[ -z "$server_ips" ]] && server_ips="IP:127.0.0.1"
+  local san="IP:127.0.0.1,${server_ips}"
+
+  # Generate a self-signed cert valid for 10 years covering all server IPs
+  info "Generating self-signed TLS certificate (SAN: ${san})..."
+  openssl req -x509 -newkey rsa:2048 \
+    -keyout "${cert_dir}/key.pem" \
+    -out    "${cert_dir}/cert.pem" \
+    -sha256 -days 3650 -nodes \
+    -subj   "/CN=openclaw-gateway" \
+    -addext "subjectAltName=${san}" \
+    2>/dev/null
+  chmod 644 "${cert_dir}/cert.pem" "${cert_dir}/key.pem"
+  success "TLS certificate generated."
+
+  # Caddyfile — use the pre-generated cert so TLS is ready immediately on start
   cat > "${INSTALL_DIR}/Caddyfile" <<EOF
 :${HTTPS_PORT} {
-    tls internal
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
     reverse_proxy openclaw-gateway:${GATEWAY_PORT}
 }
 EOF
 
-  # docker-compose.override.yml — adds Caddy as a sidecar; Docker Compose
-  # automatically merges this with docker-compose.yml on every `compose up`.
+  # docker-compose.override.yml — adds Caddy as a sidecar
   cat > "${INSTALL_DIR}/docker-compose.override.yml" <<EOF
 services:
   caddy:
@@ -510,14 +548,9 @@ services:
       - "${HTTPS_PORT}:${HTTPS_PORT}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./certs:/etc/caddy/certs:ro
     depends_on:
       - openclaw-gateway
-
-volumes:
-  caddy_data:
-  caddy_config:
 EOF
 
   success "Caddy configured (HTTPS on port ${HTTPS_PORT})."
