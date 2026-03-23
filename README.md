@@ -2,6 +2,8 @@
 
 > One-shot interactive Bash script that installs and configures [OpenClaw](https://github.com/openclaw/openclaw) on any Linux server — your own VPS, home lab, or private VPN — without Hostinger's hPanel.
 
+If this saved you time, consider giving it a ⭐ on [GitHub](https://github.com/tahasaifeee/openclaw_AutoInstall_Dockerized)!
+
 ---
 
 ## What It Does
