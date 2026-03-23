@@ -493,11 +493,6 @@ setup_caddy() {
 
   # Caddyfile — internal TLS (self-signed CA) proxying to the gateway container
   cat > "${INSTALL_DIR}/Caddyfile" <<EOF
-{
-    local_certs
-    auto_https off
-}
-
 :${HTTPS_PORT} {
     tls internal
     reverse_proxy openclaw-gateway:${GATEWAY_PORT}
@@ -550,7 +545,7 @@ health_check() {
   info "Waiting for gateway to become healthy (up to 60s)..."
   local attempts=0 max=30
   while [[ $attempts -lt $max ]]; do
-    if curl -fsSk "https://127.0.0.1:${HTTPS_PORT}/healthz" &>/dev/null; then
+    if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/healthz" &>/dev/null; then
       echo
       success "Gateway is healthy!"
       return 0
