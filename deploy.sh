@@ -425,6 +425,10 @@ write_env() {
 # ── Image ─────────────────────────────────────────────────────────────────────
 OPENCLAW_IMAGE=${OPENCLAW_IMAGE}
 
+# ── Directories (required for Docker volume mounts) ───────────────────────────
+OPENCLAW_CONFIG_DIR=${HOME}/.openclaw
+OPENCLAW_WORKSPACE_DIR=${HOME}/openclaw/workspace
+
 # ── Gateway ───────────────────────────────────────────────────────────────────
 OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
 OPENCLAW_GATEWAY_PORT=${GATEWAY_PORT}
@@ -504,6 +508,10 @@ run_onboarding() {
 # ─── Start Services ───────────────────────────────────────────────────────────
 start_services() {
   cd "$INSTALL_DIR"
+
+  # Ensure host directories exist before Docker tries to bind-mount them
+  mkdir -p "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
+
   info "Starting OpenClaw gateway..."
   docker compose up -d openclaw-gateway
   success "Gateway container started."
