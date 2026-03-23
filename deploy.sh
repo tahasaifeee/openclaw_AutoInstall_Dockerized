@@ -558,8 +558,8 @@ health_check() {
   echo
   warn "Gateway health check timed out after $((max * 2))s."
   warn "Last 20 lines of container logs:"
-  docker compose -f "${INSTALL_DIR}/docker-compose.yml" logs --tail=20 2>/dev/null || true
-  warn "To follow live logs: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
+  (cd "${INSTALL_DIR}" && docker compose logs --tail=20 2>/dev/null) || true
+  warn "To follow live logs: cd ${INSTALL_DIR} && docker compose logs -f"
 }
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
@@ -587,9 +587,9 @@ print_summary() {
   echo
   echo -e "${BOLD}${CYAN}━━━  Useful Commands  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Logs:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
-  echo -e "  ${BOLD}Stop:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
-  echo -e "  ${BOLD}Restart:${RESET} docker compose -f ${INSTALL_DIR}/docker-compose.yml restart"
+  echo -e "  ${BOLD}Logs:${RESET}    cd ${INSTALL_DIR} && docker compose logs -f"
+  echo -e "  ${BOLD}Stop:${RESET}    cd ${INSTALL_DIR} && docker compose down"
+  echo -e "  ${BOLD}Restart:${RESET} cd ${INSTALL_DIR} && docker compose restart"
   echo -e "  ${BOLD}Update:${RESET}  cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
   echo
 }
