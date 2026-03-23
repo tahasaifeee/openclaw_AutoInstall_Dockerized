@@ -49,23 +49,24 @@
 
 ## Quick Start
 
+### One-line install *(recommended)*
+
+SSH into your server and run:
+
 ```bash
-# Download
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/deploy.sh -o deploy.sh
-
-# Make executable
-chmod +x deploy.sh
-
-# Run
-bash deploy.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh)
 ```
 
-> **Tip:** Copy the script to your server first, then run it there — not on your local machine.
->
-> ```bash
-> scp deploy.sh user@your-server:~/
-> ssh user@your-server "bash deploy.sh"
-> ```
+That's it. The script handles everything from Docker installation to the running gateway.
+
+### Manual install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh -o deploy.sh
+chmod +x deploy.sh && bash deploy.sh
+```
+
+> **Note:** Run these commands on your server over SSH, not on your local machine.
 
 ---
 
