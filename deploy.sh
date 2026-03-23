@@ -587,6 +587,54 @@ health_check() {
   warn "To follow live logs: cd ${INSTALL_DIR} && docker compose logs -f"
 }
 
+# ─── Auto-Approve Device Pairing ─────────────────────────────────────────────
+auto_approve_pairing() {
+  local pending_file="${HOME}/.openclaw/devices/pending.json"
+  local server_ip
+  server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "your-server-ip")
+
+  echo
+  echo -e "${BOLD}${CYAN}━━━  Browser Pairing  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo
+  echo -e "  Open this URL in your browser:"
+  echo -e "  ${BOLD}${CYAN}  ➜  https://${server_ip}/#token=${GATEWAY_TOKEN}${RESET}"
+  echo
+  echo -e "  Accept the certificate warning, then click ${BOLD}Connect${RESET}."
+  echo -e "  The script will auto-approve the pairing request."
+  echo
+
+  local attempts=0 max=60  # 2 minutes
+  while [[ $attempts -lt $max ]]; do
+    # Check for any pending entry in pending.json
+    local request_id
+    request_id=$(jq -r 'keys[0] // empty' "$pending_file" 2>/dev/null)
+
+    if [[ -n "$request_id" ]]; then
+      echo
+      info "Pairing request detected: ${request_id:0:16}... — approving..."
+      if (cd "$INSTALL_DIR" && \
+          docker compose run --rm openclaw-cli devices approve "$request_id" \
+          2>/dev/null); then
+        success "Device paired! The web UI is ready to use."
+        return 0
+      else
+        warn "Approval failed. You can approve manually:"
+        warn "  cd ${INSTALL_DIR} && docker compose run --rm openclaw-cli devices approve ${request_id}"
+        return 1
+      fi
+    fi
+
+    echo -n "  [${attempts}/${max}] waiting for browser connection..."$'\r'
+    sleep 2
+    attempts=$((attempts + 1))
+  done
+
+  echo
+  warn "No pairing request detected within 2 minutes."
+  warn "After opening the browser, run:"
+  warn "  cd ${INSTALL_DIR} && docker compose run --rm openclaw-cli devices approve \$(jq -r 'keys[0]' ~/.openclaw/devices/pending.json)"
+}
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
   local server_ip
@@ -597,16 +645,11 @@ print_summary() {
   echo -e "${BOLD}${GREEN}  OpenClaw is ready!${RESET}"
   echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Open in your browser:${RESET}"
-  echo -e "  ${BOLD}${CYAN}  ➜  https://${server_ip}${RESET}"
+  echo -e "  ${BOLD}Dashboard URL (token pre-filled):${RESET}"
+  echo -e "  ${BOLD}${CYAN}  ➜  https://${server_ip}/#token=${GATEWAY_TOKEN}${RESET}"
   echo
-  echo -e "  ${YELLOW}Note: Your browser will show a certificate warning (self-signed).${RESET}"
-  echo -e "  Click ${BOLD}Advanced → Proceed${RESET} to continue — this is expected."
+  echo -e "  ${YELLOW}Note: Accept the certificate warning (self-signed cert) on first visit.${RESET}"
   echo
-  echo -e "  ${BOLD}Login token:${RESET}"
-  echo -e "  ${YELLOW}${BOLD}  ${GATEWAY_TOKEN}${RESET}"
-  echo
-  echo -e "  Paste the token into the web UI to log in."
   echo -e "  Configure AI keys, channels (WhatsApp, Telegram, Discord)"
   echo -e "  and all other settings directly inside the dashboard."
   echo
@@ -660,6 +703,7 @@ main() {
   start_services
   configure_firewall
   health_check
+  auto_approve_pairing
   print_summary
 }
 
