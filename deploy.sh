@@ -83,6 +83,28 @@ ask_yn() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+# ─── Latest Stable Version Resolution ────────────────────────────────────────
+resolve_latest_version() {
+  info "Resolving latest stable OpenClaw release..."
+
+  local api_url="https://api.github.com/repos/openclaw/openclaw/releases/latest"
+  local version=""
+
+  if command_exists curl; then
+    version=$(curl -fsSL "$api_url" 2>/dev/null \
+      | grep '"tag_name"' \
+      | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+  fi
+
+  if [[ -z "$version" ]]; then
+    warn "Could not resolve latest release from GitHub API. Falling back to 'latest' tag."
+    OPENCLAW_VERSION="latest"
+  else
+    OPENCLAW_VERSION="$version"
+    success "Latest stable release: ${OPENCLAW_VERSION}"
+  fi
+}
+
 # ─── OS Detection ─────────────────────────────────────────────────────────────
 detect_os() {
   if [[ -f /etc/os-release ]]; then
@@ -301,7 +323,7 @@ gather_config() {
   echo "  2) Build from source (slower, no external registry needed)"
   ask IMAGE_CHOICE "Choose" "1"
   if [[ "$IMAGE_CHOICE" == "1" ]]; then
-    OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:latest"
+    OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}"
     info "Using pre-built image: ${OPENCLAW_IMAGE}"
   else
     OPENCLAW_IMAGE="openclaw:local"
@@ -367,12 +389,23 @@ setup_repo() {
   info "Setting up OpenClaw repository at: ${INSTALL_DIR}"
 
   if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    info "Repository already exists. Pulling latest changes..."
-    git -C "$INSTALL_DIR" pull --ff-only || warn "Could not pull latest changes. Continuing with existing version."
+    info "Repository already exists. Fetching tags and checking out ${OPENCLAW_VERSION}..."
+    git -C "$INSTALL_DIR" fetch --tags --quiet || warn "Could not fetch tags. Continuing with current version."
+    if [[ "$OPENCLAW_VERSION" != "latest" ]]; then
+      git -C "$INSTALL_DIR" checkout "$OPENCLAW_VERSION" --quiet 2>/dev/null || \
+        warn "Could not checkout ${OPENCLAW_VERSION}. Staying on current commit."
+    else
+      git -C "$INSTALL_DIR" pull --ff-only --quiet || warn "Could not pull latest changes. Continuing with existing version."
+    fi
   else
     mkdir -p "$(dirname "$INSTALL_DIR")"
-    git clone https://github.com/openclaw/openclaw.git "$INSTALL_DIR"
-    success "Repository cloned."
+    if [[ "$OPENCLAW_VERSION" != "latest" ]]; then
+      git clone --branch "$OPENCLAW_VERSION" --depth 1 \
+        https://github.com/openclaw/openclaw.git "$INSTALL_DIR"
+    else
+      git clone --depth 1 https://github.com/openclaw/openclaw.git "$INSTALL_DIR"
+    fi
+    success "Repository cloned at version ${OPENCLAW_VERSION}."
   fi
 }
 
@@ -612,6 +645,7 @@ main() {
   fi
 
   install_docker_compose
+  resolve_latest_version
   gather_config
   setup_repo
   write_env
