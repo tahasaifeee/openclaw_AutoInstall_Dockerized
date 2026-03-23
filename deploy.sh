@@ -655,10 +655,68 @@ print_summary() {
   echo
   echo -e "${BOLD}${CYAN}━━━  Useful Commands  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Logs:${RESET}    cd ${INSTALL_DIR} && docker compose logs -f"
-  echo -e "  ${BOLD}Stop:${RESET}    cd ${INSTALL_DIR} && docker compose down"
-  echo -e "  ${BOLD}Restart:${RESET} cd ${INSTALL_DIR} && docker compose restart"
-  echo -e "  ${BOLD}Update:${RESET}  cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
+  echo -e "  ${BOLD}Logs:${RESET}      cd ${INSTALL_DIR} && docker compose logs -f"
+  echo -e "  ${BOLD}Stop:${RESET}      cd ${INSTALL_DIR} && docker compose down"
+  echo -e "  ${BOLD}Restart:${RESET}   cd ${INSTALL_DIR} && docker compose restart"
+  echo -e "  ${BOLD}Update:${RESET}    cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
+  echo -e "  ${BOLD}Uninstall:${RESET} bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh) --uninstall"
+  echo
+}
+
+# ─── Uninstall ────────────────────────────────────────────────────────────────
+uninstall() {
+  banner
+  echo -e "${BOLD}${RED}━━━  Uninstall OpenClaw  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo
+  echo -e "  This will remove:"
+  echo -e "    • All OpenClaw containers and volumes"
+  echo -e "    • Install directory:  ${HOME}/openclaw"
+  echo -e "    • Config directory:   ${HOME}/.openclaw"
+  echo -e "    • Workspace:          ${HOME}/openclaw/workspace"
+  echo
+  if ! ask_yn "Are you sure you want to completely uninstall OpenClaw?" "n"; then
+    info "Uninstall cancelled."
+    exit 0
+  fi
+
+  local install_dir="${HOME}/openclaw"
+
+  # ── Stop and remove containers + volumes ─────────────────────────────────
+  if [[ -f "${install_dir}/docker-compose.yml" ]]; then
+    info "Stopping and removing containers..."
+    (cd "$install_dir" && docker compose down --volumes --remove-orphans 2>/dev/null) || \
+      warn "Could not stop containers (may already be stopped)."
+    success "Containers removed."
+  fi
+
+  # ── Remove Docker images ──────────────────────────────────────────────────
+  if ask_yn "Also remove the OpenClaw Docker image (frees disk space)?" "y"; then
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'openclaw|caddy' | \
+      xargs -r docker rmi -f 2>/dev/null || true
+    success "Docker images removed."
+  fi
+
+  # ── Close firewall port ───────────────────────────────────────────────────
+  detect_os 2>/dev/null || true
+  if command_exists ufw; then
+    sudo ufw delete allow 443/tcp 2>/dev/null || true
+    success "ufw: port 443 closed."
+  elif command_exists firewall-cmd; then
+    sudo firewall-cmd --permanent --remove-port=443/tcp 2>/dev/null || true
+    sudo firewall-cmd --reload 2>/dev/null || true
+    success "firewalld: port 443 closed."
+  fi
+
+  # ── Remove install and config directories ────────────────────────────────
+  info "Removing install directory: ${install_dir}"
+  rm -rf "$install_dir"
+
+  info "Removing config directory: ${HOME}/.openclaw"
+  rm -rf "${HOME}/.openclaw"
+
+  echo
+  echo -e "${BOLD}${GREEN}━━━  Uninstall Complete  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo -e "  OpenClaw has been fully removed from this system."
   echo
 }
 
@@ -672,6 +730,14 @@ relaunch_with_docker_group() {
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
+  # Handle --uninstall flag before anything else
+  for arg in "$@"; do
+    if [[ "$arg" == "--uninstall" || "$arg" == "uninstall" ]]; then
+      uninstall
+      exit 0
+    fi
+  done
+
   banner
 
   # Guard against running inside Docker itself
