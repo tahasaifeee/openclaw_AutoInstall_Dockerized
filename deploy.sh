@@ -317,8 +317,9 @@ gather_config() {
   # Installation directory — always use default, no prompt needed
   INSTALL_DIR="$HOME/openclaw"
 
-  # Gateway port
-  ask GATEWAY_PORT "Gateway web UI port" "18789"
+  # Ports
+  GATEWAY_PORT="18789"   # internal — openclaw gateway, not exposed directly
+  HTTPS_PORT="443"       # Caddy HTTPS — what the user actually opens in browser
 
   # Always use pre-built image
   OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
@@ -343,6 +344,8 @@ gather_config() {
   if command_exists ufw || command_exists firewall-cmd; then
     CONFIGURE_FIREWALL=true
   fi
+
+  info "HTTPS port: ${HTTPS_PORT}"
 
   success "Configuration ready."
 }
@@ -449,9 +452,9 @@ run_onboarding() {
 start_services() {
   cd "$INSTALL_DIR"
 
-  info "Starting OpenClaw gateway..."
-  docker compose up -d openclaw-gateway
-  success "Gateway container started."
+  info "Starting OpenClaw gateway and Caddy HTTPS proxy..."
+  docker compose up -d
+  success "Containers started."
 }
 
 # ─── Patch Config for LAN Access ─────────────────────────────────────────────
@@ -484,6 +487,47 @@ patch_config() {
   success "Config patched — Control UI accessible from LAN."
 }
 
+# ─── Caddy HTTPS Reverse Proxy ────────────────────────────────────────────────
+setup_caddy() {
+  info "Setting up Caddy HTTPS reverse proxy..."
+
+  # Caddyfile — internal TLS (self-signed CA) proxying to the gateway container
+  cat > "${INSTALL_DIR}/Caddyfile" <<EOF
+{
+    local_certs
+    auto_https off
+}
+
+:${HTTPS_PORT} {
+    tls internal
+    reverse_proxy openclaw-gateway:${GATEWAY_PORT}
+}
+EOF
+
+  # docker-compose.override.yml — adds Caddy as a sidecar; Docker Compose
+  # automatically merges this with docker-compose.yml on every `compose up`.
+  cat > "${INSTALL_DIR}/docker-compose.override.yml" <<EOF
+services:
+  caddy:
+    image: caddy:latest
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_PORT}:${HTTPS_PORT}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - openclaw-gateway
+
+volumes:
+  caddy_data:
+  caddy_config:
+EOF
+
+  success "Caddy configured (HTTPS on port ${HTTPS_PORT})."
+}
+
 # ─── Firewall ─────────────────────────────────────────────────────────────────
 configure_firewall() {
   if [[ "$CONFIGURE_FIREWALL" != "true" ]]; then
@@ -491,13 +535,13 @@ configure_firewall() {
   fi
 
   if command_exists ufw; then
-    info "Opening port ${GATEWAY_PORT}/tcp in ufw..."
-    sudo ufw allow "${GATEWAY_PORT}/tcp" && success "ufw: port ${GATEWAY_PORT} opened."
+    info "Opening port ${HTTPS_PORT}/tcp in ufw..."
+    sudo ufw allow "${HTTPS_PORT}/tcp" && success "ufw: port ${HTTPS_PORT} opened."
   elif command_exists firewall-cmd; then
-    info "Opening port ${GATEWAY_PORT}/tcp in firewalld..."
-    sudo firewall-cmd --permanent --add-port="${GATEWAY_PORT}/tcp"
+    info "Opening port ${HTTPS_PORT}/tcp in firewalld..."
+    sudo firewall-cmd --permanent --add-port="${HTTPS_PORT}/tcp"
     sudo firewall-cmd --reload
-    success "firewalld: port ${GATEWAY_PORT} opened."
+    success "firewalld: port ${HTTPS_PORT} opened."
   fi
 }
 
@@ -506,7 +550,7 @@ health_check() {
   info "Waiting for gateway to become healthy (up to 60s)..."
   local attempts=0 max=30
   while [[ $attempts -lt $max ]]; do
-    if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/healthz" &>/dev/null; then
+    if curl -fsSk "https://127.0.0.1:${HTTPS_PORT}/healthz" &>/dev/null; then
       echo
       success "Gateway is healthy!"
       return 0
@@ -519,8 +563,8 @@ health_check() {
   echo
   warn "Gateway health check timed out after $((max * 2))s."
   warn "Last 20 lines of container logs:"
-  docker compose -f "${INSTALL_DIR}/docker-compose.yml" logs --tail=20 openclaw-gateway 2>/dev/null || true
-  warn "To follow live logs: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
+  docker compose -f "${INSTALL_DIR}/docker-compose.yml" logs --tail=20 2>/dev/null || true
+  warn "To follow live logs: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
 }
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
@@ -534,7 +578,10 @@ print_summary() {
   echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
   echo -e "  ${BOLD}Open in your browser:${RESET}"
-  echo -e "  ${BOLD}${CYAN}  ➜  http://${server_ip}:${GATEWAY_PORT}${RESET}"
+  echo -e "  ${BOLD}${CYAN}  ➜  https://${server_ip}${RESET}"
+  echo
+  echo -e "  ${YELLOW}Note: Your browser will show a certificate warning (self-signed).${RESET}"
+  echo -e "  Click ${BOLD}Advanced → Proceed${RESET} to continue — this is expected."
   echo
   echo -e "  ${BOLD}Login token:${RESET}"
   echo -e "  ${YELLOW}${BOLD}  ${GATEWAY_TOKEN}${RESET}"
@@ -545,9 +592,9 @@ print_summary() {
   echo
   echo -e "${BOLD}${CYAN}━━━  Useful Commands  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo
-  echo -e "  ${BOLD}Logs:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
+  echo -e "  ${BOLD}Logs:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
   echo -e "  ${BOLD}Stop:${RESET}    docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
-  echo -e "  ${BOLD}Restart:${RESET} docker compose -f ${INSTALL_DIR}/docker-compose.yml restart openclaw-gateway"
+  echo -e "  ${BOLD}Restart:${RESET} docker compose -f ${INSTALL_DIR}/docker-compose.yml restart"
   echo -e "  ${BOLD}Update:${RESET}  cd ${INSTALL_DIR} && git pull && docker compose pull && docker compose up -d"
   echo
 }
@@ -589,6 +636,7 @@ main() {
   prepare_image
   run_onboarding
   patch_config
+  setup_caddy
   start_services
   configure_firewall
   health_check
