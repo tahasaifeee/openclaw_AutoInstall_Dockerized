@@ -496,10 +496,15 @@ prepare_image() {
 # ─── Run Onboarding ───────────────────────────────────────────────────────────
 run_onboarding() {
   cd "$INSTALL_DIR"
+
+  # Create host directories and give the container's node user (UID 1000) write access
+  # before any Docker step tries to use them.
+  mkdir -p "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
+  chown -R 1000:1000 "${HOME}/.openclaw" "${HOME}/openclaw/workspace" 2>/dev/null || \
+    chmod -R 777 "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
+
   info "Running OpenClaw onboarding (initialises config and data directories)..."
 
-  # The onboarding step creates ~/.openclaw and workspace directories.
-  # We pass --non-interactive if available, otherwise let it run.
   docker compose run --rm openclaw-cli onboard 2>/dev/null || {
     warn "Onboarding step exited with non-zero code. This can be normal if already initialised."
   }
@@ -508,11 +513,6 @@ run_onboarding() {
 # ─── Start Services ───────────────────────────────────────────────────────────
 start_services() {
   cd "$INSTALL_DIR"
-
-  # Ensure host directories exist and are writable by the container's node user (UID 1000)
-  mkdir -p "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
-  chown -R 1000:1000 "${HOME}/.openclaw" "${HOME}/openclaw/workspace" 2>/dev/null || \
-    chmod -R 777 "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
 
   info "Starting OpenClaw gateway..."
   docker compose up -d openclaw-gateway
@@ -576,7 +576,7 @@ health_check() {
     # Show a dot every 2 seconds with a running counter
     echo -n "  [${attempts}/${max}] waiting..."$'\r'
     sleep 2
-    ((attempts++))
+    attempts=$((attempts + 1))
   done
   echo
   warn "Gateway health check timed out after $((max * 2))s."
