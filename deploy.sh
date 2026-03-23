@@ -99,9 +99,11 @@ resolve_latest_version() {
   if [[ -z "$version" ]]; then
     warn "Could not resolve latest release from GitHub API. Falling back to 'latest' tag."
     OPENCLAW_VERSION="latest"
+    OPENCLAW_IMAGE_TAG="latest"
   else
-    OPENCLAW_VERSION="$version"
-    success "Latest stable release: ${OPENCLAW_VERSION}"
+    OPENCLAW_VERSION="$version"           # e.g. v2026.3.22 — used for git checkout
+    OPENCLAW_IMAGE_TAG="${version#v}"     # e.g. 2026.3.22  — used for Docker image tag
+    success "Latest stable release: ${OPENCLAW_VERSION} (image tag: ${OPENCLAW_IMAGE_TAG})"
   fi
 }
 
@@ -323,7 +325,7 @@ gather_config() {
   echo "  2) Build from source (slower, no external registry needed)"
   ask IMAGE_CHOICE "Choose" "1"
   if [[ "$IMAGE_CHOICE" == "1" ]]; then
-    OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}"
+    OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
     info "Using pre-built image: ${OPENCLAW_IMAGE}"
   else
     OPENCLAW_IMAGE="openclaw:local"
