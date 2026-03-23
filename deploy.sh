@@ -394,7 +394,6 @@ OPENCLAW_WORKSPACE_DIR=${HOME}/openclaw/workspace
 OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
 OPENCLAW_GATEWAY_PORT=${GATEWAY_PORT}
 OPENCLAW_GATEWAY_BIND=lan
-OPENCLAW_GATEWAY_CONTROLUI_DANGEROUSLYALLOWHOSTHEADERORIGINFALLBACK=true
 
 # ── Sandbox ───────────────────────────────────────────────────────────────────
 OPENCLAW_SANDBOX=${OPENCLAW_SANDBOX}
@@ -453,6 +452,36 @@ start_services() {
   info "Starting OpenClaw gateway..."
   docker compose up -d openclaw-gateway
   success "Gateway container started."
+}
+
+# ─── Patch Config for LAN Access ─────────────────────────────────────────────
+patch_config() {
+  local config_file="${HOME}/.openclaw/openclaw.json"
+
+  # Wait up to 10s for onboarding to write the config file
+  local attempts=0
+  while [[ ! -f "$config_file" && $attempts -lt 5 ]]; do
+    sleep 2
+    attempts=$((attempts + 1))
+  done
+
+  if [[ ! -f "$config_file" ]]; then
+    warn "Config file not found at ${config_file}. Skipping LAN patch."
+    return
+  fi
+
+  info "Patching OpenClaw config for LAN/remote access..."
+
+  # Merge dangerouslyAllowHostHeaderOriginFallback=true into the existing config.
+  # jq '. * {...}' does a deep merge so existing keys are preserved.
+  local tmp="${config_file}.patch.tmp"
+  jq '. * {"gateway": {"controlUi": {"dangerouslyAllowHostHeaderOriginFallback": true}}}' \
+    "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+
+  # Re-apply ownership so the container's node user can still write the file
+  chown 1000:1000 "$config_file" 2>/dev/null || chmod 666 "$config_file"
+
+  success "Config patched — Control UI accessible from LAN."
 }
 
 # ─── Firewall ─────────────────────────────────────────────────────────────────
@@ -559,6 +588,7 @@ main() {
   write_env
   prepare_image
   run_onboarding
+  patch_config
   start_services
   configure_firewall
   health_check
