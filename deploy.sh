@@ -325,20 +325,10 @@ gather_config() {
   OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_IMAGE_TAG}"
   info "Image: ${OPENCLAW_IMAGE}"
 
-  # Preserve existing token on re-runs; generate once on first install
-  local existing_token
-  existing_token=$(grep -m1 'OPENCLAW_GATEWAY_TOKEN=' "${INSTALL_DIR}/.env" 2>/dev/null \
-    | cut -d'=' -f2-)
-  if [[ -n "$existing_token" ]]; then
-    GATEWAY_TOKEN="$existing_token"
-    info "Preserving existing gateway token."
-  else
-    GATEWAY_TOKEN=$(openssl rand -hex 32)
-  fi
-  echo
-  echo -e "  ${BOLD}Gateway Token (save this — you need it to log in):${RESET}"
-  echo -e "  ${YELLOW}${BOLD}${GATEWAY_TOKEN}${RESET}"
-  echo
+  # Token is set by onboarding and read back in patch_config().
+  # We use a placeholder here; the real value is displayed in print_summary()
+  # after patch_config() has updated GATEWAY_TOKEN from openclaw.json.
+  GATEWAY_TOKEN="(will be shown after setup)"
 
   # Auto-detect timezone
   TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
@@ -402,7 +392,7 @@ OPENCLAW_CONFIG_DIR=${HOME}/.openclaw
 OPENCLAW_WORKSPACE_DIR=${HOME}/openclaw/workspace
 
 # ── Gateway ───────────────────────────────────────────────────────────────────
-OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
+# Note: gateway token is managed by openclaw.json — do not set OPENCLAW_GATEWAY_TOKEN here.
 OPENCLAW_GATEWAY_PORT=${GATEWAY_PORT}
 OPENCLAW_GATEWAY_BIND=lan
 
