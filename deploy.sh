@@ -509,8 +509,10 @@ run_onboarding() {
 start_services() {
   cd "$INSTALL_DIR"
 
-  # Ensure host directories exist before Docker tries to bind-mount them
+  # Ensure host directories exist and are writable by the container's node user (UID 1000)
   mkdir -p "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
+  chown -R 1000:1000 "${HOME}/.openclaw" "${HOME}/openclaw/workspace" 2>/dev/null || \
+    chmod -R 777 "${HOME}/.openclaw" "${HOME}/openclaw/workspace"
 
   info "Starting OpenClaw gateway..."
   docker compose up -d openclaw-gateway
@@ -563,20 +565,24 @@ configure_firewall() {
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
 health_check() {
-  info "Waiting for gateway to become healthy..."
+  info "Waiting for gateway to become healthy (up to 60s)..."
   local attempts=0 max=30
   while [[ $attempts -lt $max ]]; do
     if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/healthz" &>/dev/null; then
+      echo
       success "Gateway is healthy!"
       return 0
     fi
+    # Show a dot every 2 seconds with a running counter
+    echo -n "  [${attempts}/${max}] waiting..."$'\r'
     sleep 2
     ((attempts++))
-    echo -n "."
   done
   echo
-  warn "Gateway health check timed out. It may still be starting up."
-  warn "Check logs with: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
+  warn "Gateway health check timed out after $((max * 2))s."
+  warn "Last 20 lines of container logs:"
+  docker compose -f "${INSTALL_DIR}/docker-compose.yml" logs --tail=20 openclaw-gateway 2>/dev/null || true
+  warn "To follow live logs: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f openclaw-gateway"
 }
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
