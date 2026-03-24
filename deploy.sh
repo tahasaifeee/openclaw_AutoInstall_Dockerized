@@ -824,9 +824,35 @@ relaunch_with_docker_group() {
   fi
 }
 
+# ─── Installation State Menu ──────────────────────────────────────────────────
+installed_menu() {
+  # Called when an existing installation is detected and no flags were passed.
+  local install_dir="${HOME}/openclaw"
+
+  echo -e "${BOLD}${CYAN}━━━  OpenClaw is already installed  ━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo
+  echo -e "  Installation detected at: ${BOLD}${install_dir}${RESET}"
+  echo
+  echo -e "  ${BOLD}[1]${RESET} Update configuration  (AI keys, Telegram token, etc.)"
+  echo -e "  ${BOLD}[2]${RESET} Uninstall"
+  echo -e "  ${BOLD}[3]${RESET} Reinstall  (full fresh setup — replaces current install)"
+  echo
+
+  local choice
+  while true; do
+    read -rp "$(echo -e "${BOLD}Enter choice [1-3]: ${RESET}")" choice
+    case "$choice" in
+      1) configure_mode; exit 0 ;;
+      2) uninstall;      exit 0 ;;
+      3) info "Proceeding with reinstall..."; echo; return ;;
+      *) warn "Please enter 1, 2, or 3." ;;
+    esac
+  done
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
-  # Handle flags before anything else
+  # Handle explicit flags before anything else
   for arg in "$@"; do
     case "$arg" in
       --uninstall|uninstall)
@@ -845,6 +871,11 @@ main() {
   # Guard against running inside Docker itself
   if [[ -f /.dockerenv ]]; then
     die "This script should not be run inside a Docker container."
+  fi
+
+  # ── Auto-detect existing installation ─────────────────────────────────────
+  if [[ -f "${HOME}/openclaw/.env" ]]; then
+    installed_menu
   fi
 
   check_root
