@@ -713,7 +713,7 @@ configure_mode() {
     local label="${entry##*:}"
     local current new_val hint
 
-    current=$(grep "^${env_key}=" "$env_file" 2>/dev/null | cut -d= -f2-)
+    current=$(grep "^${env_key}=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
 
     if [[ -n "$current" ]]; then
       hint=" [current: ${current:0:8}... — Enter to keep]"
@@ -736,7 +736,7 @@ configure_mode() {
   echo -e "${BOLD}Telegram Bot Token${RESET} (from @BotFather)"
   echo
   local current_tg new_tg tg_hint
-  current_tg=$(grep "^TELEGRAM_BOT_TOKEN=" "$env_file" 2>/dev/null | cut -d= -f2-)
+  current_tg=$(grep "^TELEGRAM_BOT_TOKEN=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
   [[ -n "$current_tg" ]] && tg_hint=" [current: ${current_tg:0:8}... — Enter to keep]" || tg_hint=" [Enter to skip]"
 
   read -rsp "$(echo -e "${BOLD}Telegram bot token${tg_hint}: ${RESET}")" new_tg
