@@ -451,7 +451,10 @@ start_services() {
   cd "$INSTALL_DIR"
 
   info "Starting OpenClaw gateway and Caddy HTTPS proxy..."
-  docker compose up -d
+  # Explicitly name the long-running services only — openclaw-cli is a one-shot
+  # CLI tool and must NOT be started as a daemon (it has no persistent entrypoint
+  # and will restart-loop, blocking network namespace joins for other containers).
+  docker compose up -d openclaw-gateway caddy
   success "Containers started."
 }
 
