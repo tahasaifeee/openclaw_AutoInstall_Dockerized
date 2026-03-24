@@ -725,6 +725,7 @@ configure_mode() {
     echo
 
     if [[ -n "$new_val" ]]; then
+      echo -e "  ${CYAN}Entered:${RESET} ${new_val:0:8}...${new_val: -4} (${#new_val} chars)"
       env_set_or_append "$env_file" "$env_key" "$new_val"
       success "${env_key} updated."
       changed=true
@@ -743,6 +744,7 @@ configure_mode() {
   echo
 
   if [[ -n "$new_tg" ]]; then
+    echo -e "  ${CYAN}Entered:${RESET} ${new_tg:0:8}...${new_tg: -4} (${#new_tg} chars)"
     env_set_or_append "$env_file" "TELEGRAM_BOT_TOKEN" "$new_tg"
     success "TELEGRAM_BOT_TOKEN updated."
     changed=true
