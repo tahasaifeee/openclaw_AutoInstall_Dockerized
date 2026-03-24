@@ -83,6 +83,18 @@ ask_yn() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+# ─── Env Key Helper ───────────────────────────────────────────────────────────
+env_set_or_append() {
+  # env_set_or_append <file> <KEY> <value>
+  # Updates KEY=value if it already exists; appends it otherwise.
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
+  fi
+}
+
 # ─── Latest Stable Version Resolution ────────────────────────────────────────
 resolve_latest_version() {
   info "Resolving latest stable OpenClaw release..."
@@ -666,6 +678,87 @@ print_summary() {
   echo
 }
 
+# ─── Configure Mode (update settings without full reinstall) ─────────────────
+configure_mode() {
+  banner
+  local install_dir="${HOME}/openclaw"
+  local env_file="${install_dir}/.env"
+
+  if [[ ! -f "$env_file" ]]; then
+    die "OpenClaw is not installed at ${install_dir}. Run the script without flags to install first."
+  fi
+
+  echo -e "${BOLD}${CYAN}━━━  Update Configuration  ━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo
+  info "Editing: ${env_file}"
+  info "Press Enter on any field to keep the current value / skip it."
+  echo
+
+  # ── AI Provider Keys ──────────────────────────────────────────────────────
+  echo -e "${BOLD}AI Provider Keys${RESET}"
+  echo
+
+  local -a key_entries=(
+    "ANTHROPIC_API_KEY:Anthropic (Claude)"
+    "OPENAI_API_KEY:OpenAI (GPT)"
+    "GEMINI_API_KEY:Google (Gemini)"
+    "GROQ_API_KEY:Groq"
+    "OPENROUTER_API_KEY:OpenRouter"
+  )
+
+  local changed=false
+
+  for entry in "${key_entries[@]}"; do
+    local env_key="${entry%%:*}"
+    local label="${entry##*:}"
+    local current new_val hint
+
+    current=$(grep "^${env_key}=" "$env_file" 2>/dev/null | cut -d= -f2-)
+
+    if [[ -n "$current" ]]; then
+      hint=" [current: ${current:0:8}... — Enter to keep]"
+    else
+      hint=" [Enter to skip]"
+    fi
+
+    read -rsp "$(echo -e "${BOLD}${label} API key${hint}: ${RESET}")" new_val
+    echo
+
+    if [[ -n "$new_val" ]]; then
+      env_set_or_append "$env_file" "$env_key" "$new_val"
+      success "${env_key} updated."
+      changed=true
+    fi
+  done
+
+  # ── Telegram bot token ────────────────────────────────────────────────────
+  echo
+  echo -e "${BOLD}Telegram Bot Token${RESET} (from @BotFather)"
+  echo
+  local current_tg new_tg tg_hint
+  current_tg=$(grep "^TELEGRAM_BOT_TOKEN=" "$env_file" 2>/dev/null | cut -d= -f2-)
+  [[ -n "$current_tg" ]] && tg_hint=" [current: ${current_tg:0:8}... — Enter to keep]" || tg_hint=" [Enter to skip]"
+
+  read -rsp "$(echo -e "${BOLD}Telegram bot token${tg_hint}: ${RESET}")" new_tg
+  echo
+
+  if [[ -n "$new_tg" ]]; then
+    env_set_or_append "$env_file" "TELEGRAM_BOT_TOKEN" "$new_tg"
+    success "TELEGRAM_BOT_TOKEN updated."
+    changed=true
+  fi
+
+  # ── Apply ─────────────────────────────────────────────────────────────────
+  echo
+  if [[ "$changed" == "true" ]]; then
+    info "Restarting gateway to apply changes..."
+    (cd "$install_dir" && docker compose restart openclaw-gateway)
+    success "Gateway restarted — changes are live."
+  else
+    info "No changes made."
+  fi
+}
+
 # ─── Uninstall ────────────────────────────────────────────────────────────────
 uninstall() {
   banner
@@ -733,12 +826,18 @@ relaunch_with_docker_group() {
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
-  # Handle --uninstall flag before anything else
+  # Handle flags before anything else
   for arg in "$@"; do
-    if [[ "$arg" == "--uninstall" || "$arg" == "uninstall" ]]; then
-      uninstall
-      exit 0
-    fi
+    case "$arg" in
+      --uninstall|uninstall)
+        uninstall
+        exit 0
+        ;;
+      --configure|configure)
+        configure_mode
+        exit 0
+        ;;
+    esac
   done
 
   banner

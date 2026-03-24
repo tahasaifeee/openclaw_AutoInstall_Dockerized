@@ -110,6 +110,22 @@ Browser (HTTPS :443)
 
 ---
 
+## Update Configuration
+
+Update AI keys or Telegram bot token without re-running the full setup:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/openclaw_AutoInstall_Dockerized/main/deploy.sh) --configure
+```
+
+Prompts for each setting with the current value masked. Press Enter to skip any field. Restarts the gateway automatically if anything changed.
+
+Supported fields:
+- Anthropic, OpenAI, Gemini, Groq, OpenRouter API keys
+- Telegram bot token
+
+---
+
 ## Uninstall
 
 ```bash
